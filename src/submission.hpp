@@ -8,20 +8,6 @@
 #include <limits>
 #include <iostream>
 
-/*
-==========README==========
-code is mostly done, more comments and explanations to come
-
-main optmizations: 
-- multithreading (~2x) [general]
-- quantization (~3x) [somewhat general]
-- bounding rectangle (~4x) [very niche]
-
-currently quantization might fail (?), theoretical worst case upper bound is too loose, 
-although it does exceptionally well in practice. more empirical testing to be done
-===========================
-*/
-
 // quite hacky but completely crushes the benchmark test case, giving a 3-4x speedup
 // stores the minimum bounding rectangle of non-zero values
 struct BoundingRect {
@@ -31,7 +17,6 @@ struct BoundingRect {
   std::size_t col_min;
   std::size_t col_max;
 
-  // expands the minimum bounding rectangle by 1 in each direction 
   void expand(std::size_t rows, std::size_t cols) {
     if (!has_non_zero) return; 
     if (row_min > 0) row_min--;
@@ -41,11 +26,11 @@ struct BoundingRect {
   }
 };
 
-// converts intervals into integers; each interval decodes to the middle value. 
-// mathematical upper bound for error is 2*d*x + d/2, with x = steps and d = interval size 
-// seems to hover at around <10d in practice, however
+// encode intervals of double to uint32_t; uint32_t decodes to the middle of the interval. 
+// error is relative to the quantization scale calculated from the range of the min and max value in the grid
+// error usually stays within 2 or 3 times the quantization scale, though it may blow up after thousands of steps
 struct Quantizer {
-  static constexpr double k_quantization_threshold = 6.76767e-8; // if the scale is larger than this, quantization will be inaccurate
+  static constexpr double k_quantization_threshold = 6.76767e-8; // if the scale is larger than this, quantization may be inaccurate
 
   static constexpr std::uint32_t k_rescale_period = 256;
 
@@ -101,6 +86,7 @@ public:
     written_ = false;
   }
 
+  // force update the double grid, used when the harness is checking correctness 
   void apply_codes() {
     if (!quantizer_.initialized) {
       return;
@@ -234,7 +220,6 @@ inline void rescale_quantization(Grid& grid, const BoundingRect& rect, Quantizer
 
   std::uint32_t max_code = 0;
 
-  // Only scan the active rectangle.
   for (std::size_t i = rect.row_min; i <= rect.row_max; i++) {
     for (std::size_t j = rect.col_min; j <= rect.col_max; j++) {
       max_code = std::max(max_code, grid.codes(i, j));
@@ -262,6 +247,14 @@ inline void rescale_quantization(Grid& grid, const BoundingRect& rect, Quantizer
   }
 }
 
+inline void quantizer_step(Grid& new_grid, const BoundingRect& rect)
+{
+  new_grid.quantizer().steps++;
+  if (new_grid.quantizer().steps % Quantizer::k_rescale_period == 0) {
+    rescale_quantization(new_grid, rect, new_grid.quantizer()); 
+  }
+}
+
 inline void apply_quantized_stencil(const Grid& old_grid, Grid& new_grid, const BoundingRect& rect)
 {
   const std::size_t rows = old_grid.rows();
@@ -279,9 +272,11 @@ inline void apply_quantized_stencil(const Grid& old_grid, Grid& new_grid, const 
 #endif
   for (std::size_t i = row_start; i <= row_end; i++) {
 #ifdef _OPENMP
-    #pragma omp simd // based on testing this doesn't offer much benefit, the compiler likely already vectorizes this loop, but good to have in case
+    #pragma omp simd // based on testing this doesn't offer much benefit, the compiler likely already vectorizes this loop
 #endif
     for (std::size_t j = col_start; j <= col_end; j++) {
+      // explanation: https://github.com/UWHPC/onboarding-template/pull/82#issue-5578211595
+
       const std::uint32_t center = old_grid.codes(i, j);
       const std::uint32_t up     = old_grid.codes(i - 1, j);
       const std::uint32_t down   = old_grid.codes(i + 1, j);
@@ -293,11 +288,12 @@ inline void apply_quantized_stencil(const Grid& old_grid, Grid& new_grid, const 
       const std::uint32_t whole = remainder >> 3;
       const std::uint32_t fraction = remainder & 7u; 
       const bool round_up = fraction > 4u || (fraction == 4u && ((base + whole) & 1u));
-      new_grid.codes(i, j) = base + whole + static_cast<std::uint32_t>(round_up); // "trust me bro i did the math" jk will explain later 
 
-      // new_grid.data(i, j) = 0.5 * old_grid.data(i, j) + 0.125 * (old_grid.data(i-1, j) + old_grid.data(i+1, j) + old_grid.data(i, j-1) + old_grid.data(i, j+1));
+      new_grid.codes(i, j) = base + whole + static_cast<std::uint32_t>(round_up); 
     }
   }
+
+  quantizer_step(new_grid, rect);
 }
 
 inline void apply_double_stencil(const Grid& old_grid, Grid& new_grid, const BoundingRect& rect)
@@ -317,7 +313,7 @@ inline void apply_double_stencil(const Grid& old_grid, Grid& new_grid, const Bou
 #endif
   for (std::size_t i = row_start; i <= row_end; i++) {
 #ifdef _OPENMP
-    #pragma omp simd // based on testing this doesn't offer much benefit, the compiler likely already vectorizes this loop, but good to have in case
+    #pragma omp simd // based on testing this doesn't offer much benefit, the compiler likely already vectorizes this loop
 #endif
     for (std::size_t j = col_start; j <= col_end; j++) {
       new_grid.data(i, j) = 0.5 * old_grid.data(i, j) + 0.125 * (old_grid.data(i-1, j) + old_grid.data(i+1, j) + old_grid.data(i, j-1) + old_grid.data(i, j+1));
@@ -328,7 +324,7 @@ inline void apply_double_stencil(const Grid& old_grid, Grid& new_grid, const Bou
 void apply_stencil(const Grid& old_grid, Grid& new_grid)
 {
   if (!old_grid.initialized() && new_grid.written()) {
-    new_grid.reset_state();
+    new_grid.reset_state(); // needed since the harness seems to re-use old gridss 
   }
 
   BoundingRect rect = old_grid.bounding_rect();
@@ -338,23 +334,20 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid)
     initialize_state(old_grid, new_grid, rect, quantizer);
   }
 
-  rect.expand(old_grid.rows(), old_grid.cols()); // expand by the diffusion radius of 1 per step 
+  rect.expand(old_grid.rows(), old_grid.cols());
 
   new_grid.bounding_rect() = rect;
   new_grid.quantizer() = quantizer;
-  
   new_grid.initialized() = true;
   new_grid.written() = true;
 
-  if (rect.has_non_zero) {
-    if (quantizer.initialized) {
-      apply_quantized_stencil(old_grid, new_grid, rect);
-      new_grid.quantizer().steps++;
-      if (new_grid.quantizer().steps % Quantizer::k_rescale_period == 0) {
-        rescale_quantization(new_grid, rect, new_grid.quantizer()); 
-      }
-    } else { 
-      apply_double_stencil(old_grid, new_grid, rect);
-    }
+  if (!rect.has_non_zero) {
+    return;
+  }
+
+  if (quantizer.initialized) {
+    apply_quantized_stencil(old_grid, new_grid, rect);
+  } else { 
+    apply_double_stencil(old_grid, new_grid, rect);
   }
 }
