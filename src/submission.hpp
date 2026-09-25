@@ -98,14 +98,23 @@ public:
     quantizer_ = {false, std::numeric_limits<double>::max(), std::numeric_limits<double>::lowest(), 0.0, 0};
 
     initialized_ = false; 
-    written_ = true;
+    written_ = false;
+  }
+
+  void apply_codes() {
+    if (!quantizer_.initialized) {
+      return;
+    }
+    for (std::size_t k = 0; k < data_.size(); k++) {
+      data_[k] = quantizer_.decode(codes_[k]);
+    }
+    bounding_rect_ = {false, rows_, 0, cols_, 0};
+    quantizer_ = {false, std::numeric_limits<double>::max(), std::numeric_limits<double>::lowest(), 0.0, 0};
+    initialized_ = false;
   }
 
   double& operator()(std::size_t i, std::size_t j) {
-    if (initialized_ && !written_) {
-      reset_state();
-    }
-    
+    apply_codes();
     return data_[i*cols_ + j];
   }
   double  operator()(std::size_t i, std::size_t j) const {
@@ -197,7 +206,7 @@ inline void initialize_state(const Grid& old_grid, Grid& new_grid, BoundingRect&
   }
   
   quantizer.scale = (quantizer.max_value - quantizer.min_value) / Quantizer::k_code_count;
-  quantizer.initialized = (quantizer.scale < Quantizer::k_quantization_threshold) && quantizer.scale != 0.0;
+  quantizer.initialized = (quantizer.scale < Quantizer::k_quantization_threshold) && quantizer.scale != 0.0 && quantizer.min_value >= 0.0;
 
   if (!quantizer.initialized) {
     return;
@@ -318,9 +327,10 @@ inline void apply_double_stencil(const Grid& old_grid, Grid& new_grid, const Bou
 
 void apply_stencil(const Grid& old_grid, Grid& new_grid)
 {
-  if (!old_grid.initialized()) {
+  if (!old_grid.initialized() && new_grid.written()) {
     new_grid.reset_state();
-}
+  }
+
   BoundingRect rect = old_grid.bounding_rect();
   Quantizer quantizer = old_grid.quantizer();
 
@@ -334,7 +344,7 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid)
   new_grid.quantizer() = quantizer;
   
   new_grid.initialized() = true;
-  new_grid.written() = false;
+  new_grid.written() = true;
 
   if (rect.has_non_zero) {
     if (quantizer.initialized) {
