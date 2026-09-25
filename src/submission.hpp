@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <vector>
 #include <algorithm>
-#include <cassert>
 #include <limits>
 
 // quite hacky but completely crushes the benchmark test case, giving a 3-4x speedup
@@ -71,7 +70,7 @@ public:
   , quantizer_({false, std::numeric_limits<double>::max(), std::numeric_limits<double>::lowest(), 0.0, 0})
   , initialized_(false), written_(false)
   {
-    assert(rows > 0 && cols > 0);
+
   }
 
   void reset_state(){
@@ -323,7 +322,7 @@ inline void apply_double_stencil(const Grid& old_grid, Grid& new_grid, const Bou
 inline void apply_stencil(const Grid& old_grid, Grid& new_grid)
 {
   if (!old_grid.initialized() && new_grid.written()) {
-    new_grid.reset_state(); // needed since the harness seems to re-use old gridss 
+    new_grid.reset_state(); // needed since the harness seems to re-use old grids 
   }
 
   BoundingRect rect = old_grid.bounding_rect();
