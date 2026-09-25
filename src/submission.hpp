@@ -90,22 +90,7 @@ public:
     assert(rows > 0 && cols > 0);
   }
 
-  void apply_codes() {
-    if (!quantizer_.initialized) {
-      return;
-    }
-
-    for (std::size_t k = 0; k < data_.size(); ++k) {
-      data_[k] = quantizer_.decode(codes_[k]);
-    }
-
-    quantizer_.initialized = false;
-    initialized_ = false;
-    bounding_rect_ = {false, rows_, 0, cols_, 0};
-  }
-
   double& operator()(std::size_t i, std::size_t j) {
-    apply_codes();
     return data_[i*cols_ + j];
   }
   double  operator()(std::size_t i, std::size_t j) const {
