@@ -91,6 +91,7 @@ public:
   }
 
   double& operator()(std::size_t i, std::size_t j) {
+    codes_[i*cols_ + j] = 0;
     return data_[i*cols_ + j];
   }
   double  operator()(std::size_t i, std::size_t j) const {
