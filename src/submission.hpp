@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <cassert>
 #include <limits>
-#include <iostream>
 
 // quite hacky but completely crushes the benchmark test case, giving a 3-4x speedup
 // stores the minimum bounding rectangle of non-zero values
@@ -321,7 +320,7 @@ inline void apply_double_stencil(const Grid& old_grid, Grid& new_grid, const Bou
   }
 }
 
-void apply_stencil(const Grid& old_grid, Grid& new_grid)
+inline void apply_stencil(const Grid& old_grid, Grid& new_grid)
 {
   if (!old_grid.initialized() && new_grid.written()) {
     new_grid.reset_state(); // needed since the harness seems to re-use old gridss 
