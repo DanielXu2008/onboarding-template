@@ -90,7 +90,7 @@ public:
     assert(rows > 0 && cols > 0);
   }
 
-  void update_codes() {
+  void apply_codes() {
     if (!quantizer_.initialized) {
       return;
     }
@@ -105,7 +105,7 @@ public:
   }
 
   double& operator()(std::size_t i, std::size_t j) {
-    update_codes();
+    apply_codes();
     return data_[i*cols_ + j];
   }
   double  operator()(std::size_t i, std::size_t j) const {
@@ -191,7 +191,8 @@ inline void initialize_state(const Grid& old_grid, Grid& new_grid, BoundingRect&
   
   quantizer.scale = (quantizer.max_value - quantizer.min_value) / Quantizer::k_code_count;
   quantizer.initialized = (quantizer.scale < Quantizer::k_quantization_threshold) && quantizer.scale != 0.0;
-  
+  quantizer.initialized = false; // grrrr
+
   if (!quantizer.initialized) {
     return;
   }
