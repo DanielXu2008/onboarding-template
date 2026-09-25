@@ -268,7 +268,7 @@ inline void apply_quantized_stencil(const Grid& old_grid, Grid& new_grid, const 
   std::size_t cell_count = (row_end - row_start + 1) * (col_end - col_start + 1); // row_end should be >= row_start, col_end should be >= col_start, so this is safe
 
 #ifdef _OPENMP
-  #pragma omp parallel for schedule(static) if(cell_count >= (1<<16)) // testing shows a 2-3x speedup for a 1024x1024 grid 
+  #pragma omp parallel for schedule(static) num_threads(4) if(cell_count >= (1<<16)) // testing shows a 2-3x speedup for a 1024x1024 grid 
 #endif
   for (std::size_t i = row_start; i <= row_end; i++) {
 #ifdef _OPENMP
