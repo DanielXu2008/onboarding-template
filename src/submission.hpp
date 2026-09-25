@@ -45,7 +45,7 @@ struct BoundingRect {
 // mathematical upper bound for error is 2*d*x + d/2, with x = steps and d = interval size 
 // seems to hover at around <10d in practice, however
 struct Quantizer {
-  static constexpr double k_quantization_threshold = 1.676767e-7; // if the scale is larger than this, quantization will be inaccurate
+  static constexpr double k_quantization_threshold = 6.76767e-8; // if the scale is larger than this, quantization will be inaccurate
 
   static constexpr std::uint32_t k_rescale_period = 256;
 
@@ -191,7 +191,6 @@ inline void initialize_state(const Grid& old_grid, Grid& new_grid, BoundingRect&
   
   quantizer.scale = (quantizer.max_value - quantizer.min_value) / Quantizer::k_code_count;
   quantizer.initialized = (quantizer.scale < Quantizer::k_quantization_threshold) && quantizer.scale != 0.0;
-  quantizer.initialized = false; // grrrr
 
   if (!quantizer.initialized) {
     return;
