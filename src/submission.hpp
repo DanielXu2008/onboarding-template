@@ -56,7 +56,7 @@ struct Quantizer {
   bool initialized;
   double min_value, max_value;
   double scale;
-  uint32_t steps;
+  std::uint32_t steps;
   
   std::uint32_t encode(double value) const {
     return static_cast<std::uint32_t>(std::min((value - min_value) / scale, static_cast<double>(Quantizer::k_max_code)));
@@ -90,7 +90,22 @@ public:
     assert(rows > 0 && cols > 0);
   }
 
+  void update_codes() {
+    if (!quantizer_.initialized) {
+      return;
+    }
+
+    for (std::size_t k = 0; k < data_.size(); ++k) {
+      data_[k] = quantizer_.decode(codes_[k]);
+    }
+
+    quantizer_.initialized = false;
+    initialized_ = false;
+    bounding_rect_ = {false, rows_, 0, cols_, 0};
+  }
+
   double& operator()(std::size_t i, std::size_t j) {
+    update_codes();
     return data_[i*cols_ + j];
   }
   double  operator()(std::size_t i, std::size_t j) const {
