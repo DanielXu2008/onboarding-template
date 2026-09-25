@@ -78,20 +78,34 @@ private:
   BoundingRect bounding_rect_;
   Quantizer quantizer_;
 
-  bool initialized_;
+  bool initialized_, written_;
 
 public:
   Grid(std::size_t rows, std::size_t cols) 
   : rows_(rows), cols_(cols), data_(rows * cols, 0.0), codes_(rows * cols, 0)
   , bounding_rect_({false, rows, 0, cols, 0})
   , quantizer_({false, std::numeric_limits<double>::max(), std::numeric_limits<double>::lowest(), 0.0, 0})
-  , initialized_(false) 
+  , initialized_(false), written_(false)
   {
     assert(rows > 0 && cols > 0);
   }
 
+  void reset_state(){
+    std::fill(data_.begin(), data_.end(), 0.0);
+    std::fill(codes_.begin(), codes_.end(), 0);
+
+    bounding_rect_ = {false, rows_, 0, cols_, 0};
+    quantizer_ = {false, std::numeric_limits<double>::max(), std::numeric_limits<double>::lowest(), 0.0, 0};
+
+    initialized_ = false; 
+    written_ = true;
+  }
+
   double& operator()(std::size_t i, std::size_t j) {
-    codes_[i*cols_ + j] = 0;
+    if (initialized_ && !written_) {
+      reset_state();
+    }
+    
     return data_[i*cols_ + j];
   }
   double  operator()(std::size_t i, std::size_t j) const {
@@ -137,6 +151,13 @@ public:
   }
   bool  initialized() const { 
     return initialized_; 
+  }
+
+  bool &written() { 
+    return written_; 
+  }
+  bool  written() const { 
+    return written_; 
   }
 };  
 
@@ -297,6 +318,9 @@ inline void apply_double_stencil(const Grid& old_grid, Grid& new_grid, const Bou
 
 void apply_stencil(const Grid& old_grid, Grid& new_grid)
 {
+  if (!old_grid.initialized()) {
+    new_grid.reset_state();
+}
   BoundingRect rect = old_grid.bounding_rect();
   Quantizer quantizer = old_grid.quantizer();
 
@@ -307,8 +331,10 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid)
   rect.expand(old_grid.rows(), old_grid.cols()); // expand by the diffusion radius of 1 per step 
 
   new_grid.bounding_rect() = rect;
-  new_grid.quantizer() = quantizer; 
+  new_grid.quantizer() = quantizer;
+  
   new_grid.initialized() = true;
+  new_grid.written() = false;
 
   if (rect.has_non_zero) {
     if (quantizer.initialized) {
