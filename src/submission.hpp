@@ -28,7 +28,7 @@ struct BoundingRect {
 // error is relative to the quantization scale calculated from the range of the min and max value in the grid
 // error usually stays within 2 or 3 times the quantization scale, though it may blow up after thousands of steps
 struct Quantizer {
-  static constexpr double k_quantization_threshold = 6.76767e-8; // if the scale is larger than this, quantization may be inaccurate
+  static constexpr double k_quantization_threshold = 1.676767e-7; // if the scale is larger than this, quantization may be inaccurate
 
   static constexpr std::uint32_t k_rescale_period = 256;
 
