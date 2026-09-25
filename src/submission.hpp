@@ -31,7 +31,7 @@ struct BoundingRect {
   std::size_t col_min;
   std::size_t col_max;
 
-  // expands the minimum bounding rectangle by 1 in each irection 
+  // expands the minimum bounding rectangle by 1 in each direction 
   void expand(std::size_t rows, std::size_t cols) {
     if (!has_non_zero) return; 
     if (row_min > 0) row_min--;
@@ -47,6 +47,8 @@ struct BoundingRect {
 struct Quantizer {
   static constexpr double k_quantization_threshold = 1.676767e-7; // if the scale is larger than this, quantization will be inaccurate
 
+  static constexpr std::uint32_t k_rescale_period = 256;
+
   static constexpr double k_code_count = static_cast<double>(std::numeric_limits<std::uint32_t>::max()) + 1.0; // 2^32
 
   static constexpr std::uint32_t k_max_code = std::numeric_limits<std::uint32_t>::max();
@@ -54,6 +56,7 @@ struct Quantizer {
   bool initialized;
   double min_value, max_value;
   double scale;
+  uint32_t steps;
   
   std::uint32_t encode(double value) const {
     return static_cast<std::uint32_t>(std::min((value - min_value) / scale, static_cast<double>(Quantizer::k_max_code)));
@@ -81,7 +84,7 @@ public:
   Grid(std::size_t rows, std::size_t cols) 
   : rows_(rows), cols_(cols), data_(rows * cols, 0.0), codes_(rows * cols, 0)
   , bounding_rect_({false, rows, 0, cols, 0})
-  , quantizer_({false, std::numeric_limits<double>::max(), std::numeric_limits<double>::lowest(), 0.0})
+  , quantizer_({false, std::numeric_limits<double>::max(), std::numeric_limits<double>::lowest(), 0.0, 0})
   , initialized_(false) 
   {
     assert(rows > 0 && cols > 0);
@@ -159,31 +162,73 @@ inline void initialize_state(const Grid& old_grid, Grid& new_grid, BoundingRect&
     return; // avoid quantizing an empty range
   }
 
-  quantizer.scale = (quantizer.max_value - quantizer.min_value) / Quantizer::k_code_count;
-
-  for (std::size_t i = 0; i < rows; i++) {
-    for (std::size_t j = 0; j < cols; j++) {
-      old_grid.codes_mutable(i, j) = quantizer.encode(old_grid.data(i, j));
-    }
-  }
-
   // the benchmark harness performs std::swap() on the old and new grids,
   // so the edges will always be correct after the first call to apply_stencil()  
   // thus we only copy the edges once, right here
   for (std::size_t i = 0; i < rows; i++) {
     new_grid.data(i, 0) = old_grid.data(i, 0);
     new_grid.data(i, cols-1) = old_grid.data(i, cols-1);
-    new_grid.codes_mutable(i, 0) = old_grid.codes(i, 0);
-    new_grid.codes_mutable(i, cols-1) = old_grid.codes(i, cols-1);
   }
   for (std::size_t j = 0; j < cols; j++) {
     new_grid.data(0, j) = old_grid.data(0, j);
     new_grid.data(rows-1, j) = old_grid.data(rows-1, j);
+  }
+  
+  quantizer.scale = (quantizer.max_value - quantizer.min_value) / Quantizer::k_code_count;
+  quantizer.initialized = (quantizer.scale < Quantizer::k_quantization_threshold) && quantizer.scale != 0.0;
+  
+  if (!quantizer.initialized) {
+    return;
+  }
+
+  for (std::size_t i = 0; i < rows; i++) {
+    for (std::size_t j = 0; j < cols; j++) {
+      old_grid.codes_mutable(i, j) = quantizer.encode(old_grid.data(i, j));
+    }
+  }
+  for (std::size_t i = 0; i < rows; i++) {
+    new_grid.codes_mutable(i, 0) = old_grid.codes(i, 0);
+    new_grid.codes_mutable(i, cols-1) = old_grid.codes(i, cols-1);
+  }
+  for (std::size_t j = 0; j < cols; j++) {
     new_grid.codes_mutable(0, j) = old_grid.codes(0, j);
     new_grid.codes_mutable(rows-1, j) = old_grid.codes(rows-1, j);
   }
+}
 
-  quantizer.initialized = (quantizer.scale < Quantizer::k_quantization_threshold);
+inline void rescale_quantization(Grid& grid, const BoundingRect& rect, Quantizer& quantizer) {
+  if (!rect.has_non_zero) {
+    return;
+  }
+
+  std::uint32_t max_code = 0;
+
+  // Only scan the active rectangle.
+  for (std::size_t i = rect.row_min; i <= rect.row_max; i++) {
+    for (std::size_t j = rect.col_min; j <= rect.col_max; j++) {
+      max_code = std::max(max_code, grid.codes(i, j));
+    }
+  }
+
+  constexpr std::uint32_t half_range = std::numeric_limits<std::uint32_t>::max() / 2u;
+
+  if (max_code == 0 || max_code >= half_range) {
+    return;
+  }
+
+  for (std::size_t i = rect.row_min; i <= rect.row_max; i++) {
+    for (std::size_t j = rect.col_min; j <= rect.col_max; j++) {
+      grid.data(i, j) = quantizer.decode(grid.codes(i, j));
+    }
+  }
+
+  quantizer.scale *= (static_cast<double>(max_code) + 1.0) / (static_cast<double>(Quantizer::k_max_code) + 1.0);
+
+  for (std::size_t i = rect.row_min; i <= rect.row_max; i++) {
+    for (std::size_t j = rect.col_min; j <= rect.col_max; j++) {
+      grid.codes(i, j) = quantizer.encode(grid.data(i, j));
+    }
+  }
 }
 
 inline void apply_quantized_stencil(const Grid& old_grid, Grid& new_grid, const BoundingRect& rect)
@@ -256,7 +301,6 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid)
 
   if (!old_grid.initialized()){
     initialize_state(old_grid, new_grid, rect, quantizer);
-    if (quantizer.scale > 1.0e-7) std::cout << quantizer.scale << "\n";
   }
 
   rect.expand(old_grid.rows(), old_grid.cols()); // expand by the diffusion radius of 1 per step 
@@ -268,6 +312,10 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid)
   if (rect.has_non_zero) {
     if (quantizer.initialized) {
       apply_quantized_stencil(old_grid, new_grid, rect);
+      new_grid.quantizer().steps++;
+      if (new_grid.quantizer().steps % Quantizer::k_rescale_period == 0) {
+        rescale_quantization(new_grid, rect, new_grid.quantizer()); 
+      }
     } else { 
       apply_double_stencil(old_grid, new_grid, rect);
     }
